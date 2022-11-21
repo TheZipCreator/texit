@@ -235,7 +235,8 @@ mixin template Texit(string charmap,
 
   /// Plays OGG audio
   void audio(string path) {
-    aot.playOgg(path);
+    auto controller = aot.playOgg(path);
+    controller.seek(offset);
   }
 
   /// Puts text onto the screen
@@ -431,7 +432,7 @@ mixin template Texit(string charmap,
     window.eventLoop(1, 
       delegate() {
         auto dif = Clock.currTime-start;
-        float time = (dif.total!"msecs")/1000f;
+        float time = ((dif.total!"msecs")/1000f)+offset;
         import std.stdio;
         foreach_reverse(i, evt; events) {
           if(time >= evt.start && time <= evt.end) {
