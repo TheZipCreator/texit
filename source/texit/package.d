@@ -162,6 +162,19 @@ struct Vector {
 Vector translation; /// How much to translate the screen by
 float zoom = 1;     /// How much to zoom in/out
 
+// struct TexitImage {
+//   int width;
+//   int height;
+//   ubyte[] rgbaBytes;
+// }
+
+// TexitImage loadPNG(string dir) {
+//   Image i = Image.fromMemoryImage(readPng(dir));
+//   scope(exit)
+//     destroy(i);
+//   return TexitImage(i.width, i.height, i.getRgbaBytes);
+// }
+
 /// The main texit declaration
 mixin template Texit(string charmap, 
     int charSize, float scale,
@@ -240,7 +253,7 @@ mixin template Texit(string charmap,
   }
 
   /// Puts text onto the screen
-  void puts(Event e, int x, int y, float[3] bg, float[3] fg, string text) {
+  void puts(bool hasEvent)(Event e, int x, int y, float[3] bg, float[3] fg, string text) {
     int sx = x;
     foreach(c; text) {
       if(x < 0 || y < 0 || x >= worldWidth || y >= worldHeight)
@@ -249,10 +262,23 @@ mixin template Texit(string charmap,
         y++;
         x = sx;
       } else {
-        e.changeTile(Point(x, y), Tile(bg, fg, c));
+        static if(hasEvent)
+          e.changeTile(Point(x, y), Tile(bg, fg, c));
+        else
+          world[x][y] = Tile(bg, fg, c);
         x++;
       }
     }
+  }
+
+  /// Puts text with an event
+  void puts(Event e, int x, int y, float[3] bg, float[3] fg, string text) {
+    puts!true(e, x, y, bg, fg, text);
+  }
+
+  /// Puts text without an event
+  void puts(int x, int y, float[3] bg, float[3] fg, string text) {
+    puts!false(null, x, y, bg, fg, text);
   }
 
   /// Simple event to place text onto the screen at a given time
@@ -284,7 +310,7 @@ mixin template Texit(string charmap,
     }
   }
 
-  /// Types text onto the screen
+  /// Types text onto the screen. Doesn't play well with easings that go backwards (easeBack, easeBounce)
   class TypeTextEvent : TextEvent {
     Easing ease;          /// Easing to use when typing the text. Default: `easeLinear`
     float typingTime = 1; /// Amount of time (seconds) to type the text
@@ -309,6 +335,27 @@ mixin template Texit(string charmap,
       import std.math : ceil;
       int idx = cast(int)ceil(t*text.length);
       puts(this, pos.x, pos.y, bg, fg, text[0..idx]);
+    }
+  }
+
+  /// Flashing text.
+  class FlashingTextEvent : TextEvent {
+    float flashPeriod = 0.5; /// Period of flashing (in seconds)
+    float[3] fg2; /// Second foreground color
+    float[3] bg2; /// Second background color
+    this(float start, float end, Point pos, float[3] bg, float[3] fg, float[3] bg2, float[3] fg2, string text, float flashPeriod = 0.5) {
+      super(start, end, pos, fg, bg, text);
+      this.fg2 = fg2;
+      this.bg2 = bg2;
+      this.flashPeriod = flashPeriod;
+    }
+
+    override void time(float rel, float abs) {
+      float dif = abs-start;
+      if(dif%(flashPeriod*2) < flashPeriod)
+        puts(pos.x, pos.y, bg, fg, text);
+      else
+        puts(pos.x, pos.y, bg2, fg2, text);
     }
   }
 
@@ -370,10 +417,14 @@ mixin template Texit(string charmap,
     }
   }
 
+  // TexitImage img;
+  uint[1000] textures;
+
   void main() {
     // init audio thread
     AudioOutputThread aot_ = AudioOutputThread(true);
     aot = &aot_;
+    // img = loadPNG("dman.png");
     // init translation
     translation = Vector(width/4, height/4);
     // init window
@@ -420,8 +471,32 @@ mixin template Texit(string charmap,
         }
       }
       glEnd();
+      // glEnable(GL_TEXTURE_2D);
+      // glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_DECAL);
+      // glBindTexture(GL_TEXTURE_2D, textures[0]);
+      // glBegin(GL_QUADS);
+      // glTexCoord2f(0, 0);
+      // glVertex2f(0, 0);
+      // glTexCoord2f(1, 0);
+      // glVertex2f(100, 0);
+      // glTexCoord2f(1, 1);
+      // glVertex2f(100, 100);
+      // glTexCoord2f(0, 1);
+      // glVertex2f(0, 100);
+      // glEnd();
+      // glDisable(GL_TEXTURE_2D);
       
     };
+    // init some gl things
+    // glGenTextures(1000, textures.ptr);
+    // glBindTexture(GL_TEXTURE_2D, textures[0]);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, 
+    //                 GL_NEAREST);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, 
+    //                 GL_NEAREST);
+    // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, img.rgbaBytes.ptr);
     // load charmap
     chars = loadCharmap!charSize(charmap);
     // set time

@@ -11,6 +11,8 @@ module texit.app;
 
 import texit;
 
+version = ImageExample;
+
 version(HelloWorld) {
   // Texit will automatically add a main to your program
   //           charmap file,         char size,  scale, world width, world height, screen width, screen height, title
@@ -90,12 +92,12 @@ version(AudioExample) {
     float[3] randColor() {
       return [uniform01, uniform01, uniform01];
     }
-    offset = 30; // set offset /before/ you play the audio (here it's 0 so it doesn't matter but important to remember)
+    offset = 0; // set offset /before/ you play the audio (here it's 0 so it doesn't matter but important to remember)
     audio("hello_world.ogg");
     string s = "Hello, World!";
     for(int i = 0; i < WORLD_WIDTH/s.length; i++) {
       for(int j = 0; j < WORLD_HEIGHT; j++) {
-        queue(new TextEvent(uniform(0, 24).beat, float.infinity, Point(i*cast(int)s.length, j), randColor, randColor, s));
+        queue(new FlashingTextEvent(uniform(0, 24).beat, float.infinity, Point(i*cast(int)s.length, j), randColor, randColor, randColor, randColor, s, 4.beat));
       }
     }
     for(int i = 0; i < 50; i++) {
@@ -107,5 +109,13 @@ version(AudioExample) {
       queue(new ZoomEvent(a, b, 2, 4, easing!"easeInBack"));
       queue(new ZoomEvent(b, c, 4, 2, easing!"easeOutBack"));
     }
+  }
+}
+
+version(ImageExample) {
+  mixin Texit!("qbicfeet_10x10.png", 10, 2, 64, 32, 64, 32, "Image Example");
+
+  void setup() {
+
   }
 }
