@@ -48,6 +48,7 @@ bool[charSize][charSize][256] loadCharmap(int charSize)(string dir) {
 pure nothrow float ease(string easing)(float x) {
   import std.math.trigonometry : sin, cos;
   import std.math.algebraic    : sqrt;
+  import std.math.constants    : PI;
   enum float c1 = 1.70158;
   enum float c2 = c1*1.525;
   enum float c3 = c1+1;
@@ -191,7 +192,7 @@ mixin template Texit(string charmap,
   bool[charSize][charSize][256] chars; /// Bitmap of each character
   SysTime start; /// When the program was started
   AudioOutputThread* aot;
-  float offset = 0; /// Offset to start at (NOTE: currently audio is not affected by this. You will need to cut it manually for now. Once arsd.simpleaudio adds seeking, this will no longer be neccesary.)
+  float offset = 0; /// Offset to start at
 
   /// Represents single thing that can appear or happen on the screen
   abstract class Event {
@@ -253,7 +254,7 @@ mixin template Texit(string charmap,
   }
 
   /// Puts text onto the screen
-  void puts(bool hasEvent)(Event e, int x, int y, float[3] bg, float[3] fg, string text) {
+  void puts(bool hasEvent)(Event e, int x, int y, float[3] bg, float[3] fg, string text, bool replace) {
     int sx = x;
     foreach(c; text) {
       if(x < 0 || y < 0 || x >= worldWidth || y >= worldHeight)
@@ -262,23 +263,26 @@ mixin template Texit(string charmap,
         y++;
         x = sx;
       } else {
-        static if(hasEvent)
-          e.changeTile(Point(x, y), Tile(bg, fg, c));
-        else
-          world[x][y] = Tile(bg, fg, c);
+        static if(hasEvent) {
+          if(!replace || world[x][y].ch == ' ')
+            e.changeTile(Point(x, y), Tile(bg, fg, c));
+        } else {
+          if(!replace || world[x][y].ch == ' ')
+            world[x][y] = Tile(bg, fg, c);
+        }
         x++;
       }
     }
   }
 
   /// Puts text with an event
-  void puts(Event e, int x, int y, float[3] bg, float[3] fg, string text) {
-    puts!true(e, x, y, bg, fg, text);
+  void puts(Event e, int x, int y, float[3] bg, float[3] fg, string text, bool replace) {
+    puts!true(e, x, y, bg, fg, text, replace);
   }
 
   /// Puts text without an event
-  void puts(int x, int y, float[3] bg, float[3] fg, string text) {
-    puts!false(null, x, y, bg, fg, text);
+  void puts(int x, int y, float[3] bg, float[3] fg, string text, bool replace) {
+    puts!false(null, x, y, bg, fg, text, replace);
   }
 
   /// Simple event to place text onto the screen at a given time
@@ -287,22 +291,25 @@ mixin template Texit(string charmap,
     float[3] fg = [1, 1, 1];
     float[3] bg = [0, 0, 0];
     Point pos;
-    this(float start, float end, Point pos, float[3] fg, float[3] bg, string text) {
+    bool replace;
+    this(float start, float end, Point pos, float[3] fg, float[3] bg, string text, bool replace = true) {
       super(start, end);
       this.text = text;
       this.fg = fg;
       this.bg = bg;
       this.pos = pos;
+      this.replace = replace;
     }
 
-    this(float start, float end, Point pos, string text) {
+    this(float start, float end, Point pos, string text, bool replace = true) {
       super(start, end);
       this.pos = pos;
       this.text = text;
+      this.replace = replace;
     }
 
     override void enable() {
-      puts(this, pos.x, pos.y, bg, fg, text);
+      puts(this, pos.x, pos.y, bg, fg, text, replace);
     }
 
     override void disable() {
@@ -334,7 +341,7 @@ mixin template Texit(string charmap,
       float t = ease(dif/typingTime);
       import std.math : ceil;
       int idx = cast(int)ceil(t*text.length);
-      puts(this, pos.x, pos.y, bg, fg, text[0..idx]);
+      puts(this, pos.x, pos.y, bg, fg, text[0..idx], replace);
     }
   }
 
@@ -353,9 +360,9 @@ mixin template Texit(string charmap,
     override void time(float rel, float abs) {
       float dif = abs-start;
       if(dif%(flashPeriod*2) < flashPeriod)
-        puts(pos.x, pos.y, bg, fg, text);
+        puts(pos.x, pos.y, bg, fg, text, replace);
       else
-        puts(pos.x, pos.y, bg2, fg2, text);
+        puts(pos.x, pos.y, bg2, fg2, text, replace);
     }
   }
 
