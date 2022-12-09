@@ -77,7 +77,7 @@ pure nothrow float ease(string easing)(float x) {
   else static if(easing == "easeInOutQuint")
     return x < 0.5 
       ? 16*x^^5
-      : (1-(-2*x+2)^^5)/2;
+      : 1-((-2*x+2)^^5)/2;
   else static if(easing == "easeInCirc")
     return 1-sqrt(1-x^^2);
   else static if(easing == "easeOutCirc")
@@ -186,7 +186,9 @@ mixin template Texit(string charmap,
   enum WIDTH = width;
   enum HEIGHT = height;
   enum WORLD_WIDTH = worldWidth;
+  alias WW = WORLD_WIDTH;
   enum WORLD_HEIGHT = worldHeight;
+  alias WH = WORLD_HEIGHT;
   SimpleWindow window;
   Tile[worldHeight][worldWidth] world; /// The world
   bool[charSize][charSize][256] chars; /// Bitmap of each character
@@ -236,7 +238,9 @@ mixin template Texit(string charmap,
     /// Undoes all changed tiles
     void undoChanges() {
       foreach(p; changedTiles)
-        world[p.pos.x][p.pos.y] = p.prev;
+        world[p.pos.x][p.pos.y] = Tile([0, 0, 0], [0, 0, 0], ' ');
+      // foreach(p; changedTiles)
+      //   world[p.pos.x][p.pos.y] = p.prev;
     }
   }
 
@@ -244,6 +248,14 @@ mixin template Texit(string charmap,
 
   /// Queues an event
   void queue(Event e) {
+    if(offset >= e.end) {
+      e.disable();
+      return;
+    }
+    if(offset >= e.start) {
+      e.enable();
+      e.triggered = true;
+    }
     events ~= e;
   }
 
@@ -257,21 +269,26 @@ mixin template Texit(string charmap,
   void puts(bool hasEvent)(Event e, int x, int y, float[3] bg, float[3] fg, string text, bool replace) {
     int sx = x;
     foreach(c; text) {
-      if(x < 0 || y < 0 || x >= worldWidth || y >= worldHeight)
-        continue;
-      if(c == '\n') {
-        y++;
-        x = sx;
-      } else {
-        static if(hasEvent) {
-          if(!replace || world[x][y].ch == ' ')
-            e.changeTile(Point(x, y), Tile(bg, fg, c));
-        } else {
-          if(!replace || world[x][y].ch == ' ')
-            world[x][y] = Tile(bg, fg, c);
-        }
-        x++;
-      }
+			switch(c) {
+				case '\n':
+          y++;
+          x = sx;
+          break;
+        case '\r':
+          break; // grrr windows
+        default:
+          if(x < 0 || y < 0 || x >= worldWidth || y >= worldHeight)
+            continue;
+          static if(hasEvent) {
+            if(replace || world[x][y].ch == ' ')
+              e.changeTile(Point(x, y), Tile(bg, fg, c));
+          } else {
+            if(replace || world[x][y].ch == ' ')
+              world[x][y] = Tile(bg, fg, c);
+          }
+          x++;
+          break;
+			}
     }
   }
 
@@ -297,6 +314,14 @@ mixin template Texit(string charmap,
       this.text = text;
       this.fg = fg;
       this.bg = bg;
+      this.pos = pos;
+      this.replace = replace;
+    }
+
+    this(float start, float end, Point pos, float[3] fg, string text, bool replace = true) {
+      super(start, end);
+      this.text = text;
+      this.fg = fg;
       this.pos = pos;
       this.replace = replace;
     }
@@ -350,7 +375,7 @@ mixin template Texit(string charmap,
     float flashPeriod = 0.5; /// Period of flashing (in seconds)
     float[3] fg2; /// Second foreground color
     float[3] bg2; /// Second background color
-    this(float start, float end, Point pos, float[3] bg, float[3] fg, float[3] bg2, float[3] fg2, string text, float flashPeriod = 0.5) {
+    this(float start, float end, Point pos, float[3] fg, float[3] bg, float[3] fg2, float[3] bg2, string text, float flashPeriod = 0.5) {
       super(start, end, pos, fg, bg, text);
       this.fg2 = fg2;
       this.bg2 = bg2;
@@ -366,6 +391,53 @@ mixin template Texit(string charmap,
     }
   }
 
+  /// Creates a box using the +, -, and | characters
+  class BoxEvent : Event {
+    Point tl; /// Top left
+    Point br; /// Bottom right
+    float[3] fg = [1, 1, 1]; /// Foreground color
+    float[3] bg = [0, 0, 0]; /// Background color
+    this(float start, float end, Point topleft, Point bottomright, float[3] fg, float[3] bg) {
+      super(start, end);
+      this.tl = topleft;
+      this.br = bottomright;
+      this.fg = fg;
+      this.bg = bg;
+    }
+
+    this(float start, float end, Point topleft, Point bottomright, float[3] fg) {
+      super(start, end);
+      this.tl = topleft;
+      this.br = bottomright;
+      this.fg = fg;
+      this.bg = bg;
+    }
+
+    override void enable() {
+      string rep(string s, int n) {
+        import std.array : appender;
+        auto ap = appender!string;
+        for(int i = 0; i < n; i++)
+          ap ~= s;
+        return ap[];
+      }
+      import std.stdio;
+      // writeln(tl.x+1, " ", tl.y, " ", bg, " ", fg, " ", rep("-", br.x-tl.x-2));
+      puts(this, tl.x+1, tl.y, bg, fg, rep("-", br.x-tl.x-1), true);
+      puts(this, tl.x+1, br.y, bg, fg, rep("-", br.x-tl.x-1), true);
+      puts(this, tl.x, tl.y+1, bg, fg, rep("|\n", br.y-tl.y-1), true);
+      puts(this, br.x, tl.y+1, bg, fg, rep("|\n", br.y-tl.y-1), true);
+      puts(this, tl.x, tl.y, bg, fg, "+", true);
+      puts(this, tl.x, br.y, bg, fg, "+", true);
+      puts(this, br.x, tl.y, bg, fg, "+", true);
+      puts(this, br.x, br.y, bg, fg, "+", true);
+    }
+
+    override void disable() {
+      undoChanges();
+    }
+  }
+
   float mapBetween(float x, float min0, float max0, float min1, float max1) {
     return (x-min0) / (max0-min0) * (max1-min1) + min1;
   }
@@ -375,11 +447,24 @@ mixin template Texit(string charmap,
     Easing ease;
     Vector origin;
     Vector dest;
+
+    static Vector prevDest; /// The last constructed TranslationEvent's destination
+
     this(float start, float end, Vector origin, Vector dest, Easing e = easing!"easeLinear") {
       super(start, end);
       ease = e;
       this.origin = origin;
       this.dest = dest;
+      prevDest = dest;
+    }
+
+    /// Origin is assumed to be `prevDest`
+    this(float start, float end, Vector dest, Easing e = easing!"easeLinear") {
+      super(start, end);
+      ease = e;
+      this.origin = prevDest;
+      this.dest = dest;
+      prevDest = dest;
     }
 
     override void enable() {
@@ -403,10 +488,24 @@ mixin template Texit(string charmap,
     Easing ease;
     float first;
     float second;
+
+    static float prevSecond; /// Second of the last constructed ZoomEvent
+
+    /// 
     this(float start, float end, float first, float second, Easing e = easing!"easeLinear") {
       super(start, end);
       this.first = first;
       this.second = second;
+      prevSecond = second;
+      ease = e;
+    }
+    
+    /// First is assumed to be prevSecond
+    this(float start, float end, float second, Easing e = easing!"easeLinear") {
+      super(start, end);
+      this.first = prevSecond;
+      this.second = second;
+      prevSecond = second;
       ease = e;
     }
 
@@ -492,7 +591,8 @@ mixin template Texit(string charmap,
       // glVertex2f(0, 100);
       // glEnd();
       // glDisable(GL_TEXTURE_2D);
-      
+      static if(__traits(compiles, loopGl()))
+        loopGl();
     };
     // init some gl things
     // glGenTextures(1000, textures.ptr);
