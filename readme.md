@@ -8,4 +8,4 @@ Videos made with Texit:
 * [tiduna,xalAn | A submission to Agma Schwa's Cursed Conlang Circus](https://www.youtube.com/watch?v=ADIleIaMdZ4)
 
 ## Known bugs
-On some systems, you may get errors about forward references. This, I believe is a compiler bug. If you directly copy everything under source/* to your project instead of using texit as a dub dependency, it will compile fine, so do that if you run into this.
+On some systems, you may get errors about forward references. This, I believe is a compiler bug. If you directly copy everything under source/* to your project instead of using texit as a dub dependency, it will compile fine, so do that if you run into this. Note that you will need to add `arsd-official:simpledisplay` and `arsd-official:png` as dependencies, and you will need to add `asound` as a library if on Linux.
