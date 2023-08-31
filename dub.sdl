@@ -1,7 +1,0 @@
-name "texit"
-description "A text-based graphics library for D, based off arsd.simpledisplay"
-authors "TheZipCreator"
-copyright "Copyright © 2022, TheZipCreator"
-license "GNU General Public License v3"
-dependency "arsd-official:simpledisplay" version="~>10.9.2"
-dependency "arsd-official:png" version="~>10.9.2"

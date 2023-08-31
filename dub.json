@@ -1,0 +1,14 @@
+{
+	"authors": [
+		"TheZipCreator"
+	],
+	"copyright": "Copyright © 2022, TheZipCreator",
+	"dependencies": {
+		"arsd-official:png": "~>11.0.1",
+		"arsd-official:simpledisplay": "~>11.0.1"
+	},
+	"description": "A text-based animation engine for D, based off arsd.simpledisplay.",
+	"libs": ["asound"],
+	"license": "GNU General Public License v3",
+	"name": "texit"
+}
