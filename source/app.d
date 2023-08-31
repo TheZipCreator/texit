@@ -52,11 +52,14 @@ version(RandomCharacters) {
 	}
 }
 
+
 version(ScrollingZooming) {
 	mixin Texit!("assets/qbicfeet_10x10.png", 10, 2, 128, 64, 64, 32, "Scrolling & Zooming");
 
 	void setup() {
 		import std.random;
+		// set an end time
+		endTime = 14;
 		// colors are represented by float[3]
 		float[3] randColor() {
 			return [uniform01, uniform01, uniform01];
@@ -76,8 +79,10 @@ version(ScrollingZooming) {
 		for(int i = 0; i < WORLD_HEIGHT; i++)
 			queue(new TextEvent(0, float.infinity, Point(0, i), randColor, randColor, randString));
 		// start translating & zooming at time 1
-		queue(new TranslationEvent(1, 10, start, Vector(WIDTH*1.5, HEIGHT*1.5, 0), easing!"easeOutBack"));
-		queue(new ZoomEvent(1, 10, 1, 4, easing!"easeInOutCubic"));
+		queue(
+			new TranslationEvent(1, 10, start, Vector(WIDTH*1.5, HEIGHT*1.5, 0), easing!"easeOutBack"),
+			new ZoomEvent(1, 10, 1, 4, easing!"easeInOutCubic")
+		);
 	}
 }
 
@@ -106,10 +111,12 @@ version(AudioExample) {
 			float a = (i*16).beat;
 			float b = a+(8.beat);
 			float c = b+(8.beat);
-			queue(new TranslationEvent(a, b, Vector(0, WORLD_HEIGHT/2), Vector(WORLD_WIDTH, WORLD_HEIGHT/2), easing!"easeInOutBack"));
-			queue(new TranslationEvent(b, c, Vector(WORLD_WIDTH, WORLD_HEIGHT/2), Vector(0, WORLD_HEIGHT/2), easing!"easeInOutBack"));
-			queue(new ZoomEvent(a, b, 2, 4, easing!"easeInBack"));
-			queue(new ZoomEvent(b, c, 4, 2, easing!"easeOutBack"));
+			queue(
+				new TranslationEvent(a, b, Vector(0, WORLD_HEIGHT/2), Vector(WORLD_WIDTH, WORLD_HEIGHT/2), easing!"easeInOutBack"),
+				new TranslationEvent(b, c, Vector(WORLD_WIDTH, WORLD_HEIGHT/2), Vector(0, WORLD_HEIGHT/2), easing!"easeInOutBack"),
+				new ZoomEvent(a, b, 2, 4, easing!"easeInBack"),
+				new ZoomEvent(b, c, 4, 2, easing!"easeOutBack")
+			);
 		}
 	}
 }

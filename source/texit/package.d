@@ -3,8 +3,7 @@
 */
 module texit;
 
-public import std.datetime.systime, arsd.simpledisplay, arsd.simpleaudio, arsd.vorbis;
-import arsd.png;
+public import std.datetime.systime, std.getopt, std.file, arsd.simpledisplay, arsd.simpleaudio, arsd.vorbis, arsd.png;
 
 /// A single tile in the world
 struct Tile {
@@ -195,6 +194,8 @@ mixin template Texit(string charmap,
 	SysTime start; /// When the program was started
 	AudioOutputThread* aot;
 	float offset = 0; /// Offset to start at
+	float endTime = float.infinity; /// Time to end at
+	ulong frameCount; /// Current frame count.
 
 	/// Represents single thing that can appear or happen on the screen
 	abstract class Event {
@@ -247,16 +248,19 @@ mixin template Texit(string charmap,
 	Event[] events; /// List of events queued
 
 	/// Queues an event
-	void queue(Event e) {
-		if(offset >= e.end) {
-			e.disable();
-			return;
+	void queue(T...)(T evts) {
+		static foreach(e; evts) {
+			static assert(is(typeof(e) : Event), "Only events can be queued!");
+			if(offset >= e.end) {
+				e.disable();
+				return;
+			}
+			if(offset >= e.start) {
+				e.enable();
+				e.triggered = true;
+			}
+			events ~= e;
 		}
-		if(offset >= e.start) {
-			e.enable();
-			e.triggered = true;
-		}
-		events ~= e;
 	}
 
 	/// Plays OGG audio
@@ -523,14 +527,26 @@ mixin template Texit(string charmap,
 		}
 	}
 
-	// TexitImage img;
-	uint[1000] textures;
+	bool doRender; /// Whether to render to an image sequence
 
-	void main() {
+	void main(string[] args) {
+		{
+			auto opt = getopt(args,
+				"i|imagesequence", "Render to an image sequence, outputted to the directory ./images.", &doRender
+			);
+			if(opt.helpWanted) {
+				defaultGetoptPrinter("Options:", opt.options);
+				return;
+			}
+		}
+		if(doRender) {
+			if("images".exists)
+				rmdirRecurse("images");
+			mkdir("images");
+		}
 		// init audio thread
 		AudioOutputThread aot_ = AudioOutputThread(true);
 		aot = &aot_;
-		// img = loadPNG("dman.png");
 		// init translation
 		translation = Vector(width/4, height/4);
 		// init window
@@ -540,13 +556,9 @@ mixin template Texit(string charmap,
 			glOrtho(-width*charSize*(zoom/2), width*charSize*(zoom/2), height*charSize*(zoom/2), -height*charSize*(zoom/2), -1.0f, 1.0f);
 			enum css = charSize*scale;
 			glTranslatef(-translation.x*css, -translation.y*css, -translation.z*css);
+			glClearColor(0, 0, 0, 0);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 			glBegin(GL_QUADS);
-			// draw a giant black rectangle
-			glColor3f(0, 0, 0);
-			glVertex2f( -worldWidth*css,	-worldHeight*css);
-			glVertex2f(2*worldWidth*css,	-worldHeight*css);
-			glVertex2f(2*worldWidth*css, 2*worldHeight*css);
-			glVertex2f( -worldWidth*css, 2*worldHeight*css);
 			// render characters
 			for(int i = 0; i < worldWidth; i++) {
 				for(int j = 0; j < worldHeight; j++) {
@@ -579,6 +591,24 @@ mixin template Texit(string charmap,
 			glEnd();
 			static if(__traits(compiles, loopGl()))
 				loopGl();
+			// create image if necessary
+			if(doRender) {
+				auto img = new Image(window.width, window.height);
+				ubyte[] data = new ubyte[](window.width*window.height*4);
+				glReadPixels(0, 0, window.width, window.height, GL_RGBA, GL_UNSIGNED_BYTE, data.ptr);
+				// flip pixels
+				size_t w = img.width*4;
+				for(size_t i = 0; i < window.height/2; i++) {
+					size_t j = window.height-i-1;
+					ubyte[] row = data[i*w..(i+1)*w].dup;
+					data[i*w..(i+1)*w] = data[j*w..(j+1)*w];
+					data[j*w..(j+1)*w] = row;
+				}
+				img.setRgbaBytes(data);
+				import std.format;
+				writeImageToPngFile("./images/%08d.png".format(frameCount), img.toTrueColorImage());
+			}
+			frameCount++;
 		};
 		// load charmap
 		chars = loadCharmap!charSize(charmap);
@@ -590,7 +620,13 @@ mixin template Texit(string charmap,
 		window.eventLoop(1, 
 			delegate() {
 				auto dif = Clock.currTime-start;
-				float time = ((dif.total!"msecs")/1000f)+offset;
+				float time;
+				if(!doRender)
+					time = ((dif.total!"msecs")/1000f)+offset;
+				else
+					time = (1/30f)*frameCount;
+				if(time > endTime)
+					window.close();
 				import std.stdio;
 				foreach_reverse(i, evt; events) {
 					if(time >= evt.start && time <= evt.end) {
