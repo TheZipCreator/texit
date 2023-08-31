@@ -265,6 +265,8 @@ mixin template Texit(string charmap,
 
 	/// Plays OGG audio
 	void audio(string path) {
+		if(doRender)
+			return; // don't play audio if we're rendering
 		auto controller = aot.playOgg(path);
 		controller.seek(offset);
 	}
