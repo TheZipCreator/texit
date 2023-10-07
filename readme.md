@@ -1,5 +1,5 @@
 # Texit
-Texit is a simple library for text animation, building on `arsd.simpledisplay` and `arsd.simpleaudio`.
+Texit is a simple library for text animation, building on SampleDirectMediaLayer (SDL).
 
 See `source/texit/app.d` for some examples.
 
