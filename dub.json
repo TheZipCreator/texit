@@ -4,11 +4,18 @@
 	],
 	"copyright": "Copyright © 2022, TheZipCreator",
 	"dependencies": {
-		"arsd-official:png": "~>11.0.1",
-		"arsd-official:simpledisplay": "~>11.0.1"
+		"bindbc-sdl": "~>1.4.0"
 	},
+	"subConfigurations": {
+		"bindbc-sdl": "static"
+	},
+	"versions": [
+		"SDL_Mixer_2_6", "SDL_Image_2_6"
+	],
+	"libs": [
+		"SDL2", "SDL2_mixer", "SDL2_image", "asound"
+	],
 	"description": "A text-based animation engine for D, based off arsd.simpledisplay.",
-	"libs": ["asound"],
 	"license": "GNU General Public License v3",
 	"name": "texit"
 }

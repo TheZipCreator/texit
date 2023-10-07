@@ -52,7 +52,6 @@ version(RandomCharacters) {
 	}
 }
 
-
 version(ScrollingZooming) {
 	mixin Texit!("assets/qbicfeet_10x10.png", 10, 2, 128, 64, 64, 32, "Scrolling & Zooming");
 

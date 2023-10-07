@@ -3,7 +3,17 @@
 */
 module texit;
 
-public import std.datetime.systime, std.getopt, std.file, arsd.simpledisplay, arsd.simpleaudio, arsd.vorbis, arsd.png;
+public import std.datetime.systime, std.getopt, std.file, bindbc.sdl;
+public import std.string : toStringz;
+public import std.conv : to;
+
+// things bindbc-sdl is missing
+extern(C) {
+	struct SDL_FRect {
+		float x, y, w, h;
+	}
+	int SDL_RenderFillRectF(SDL_Renderer* renderer, const(SDL_FRect*) rect);
+}
 
 /// A single tile in the world
 struct Tile {
@@ -16,32 +26,7 @@ struct Tile {
 	}
 }
 
-private Image crop(Image img, int x, int y, int w, int h) {
-	Image ret = new Image(w, h);
-	for(int i = 0; i < w; i++)
-		for(int j = 0; j < h; j++)
-			ret.setPixel(i, j, img.getPixel(x+i, y+j));
-	return ret;
-}
 
-/// Returns a charmap given a directory and a char size
-bool[charSize][charSize][256] loadCharmap(int charSize)(string dir) {
-	Image charmap = Image.fromMemoryImage(dir.readPng);
-	bool[charSize][charSize][256] chars;
-	for(int i = 0; i < 16; i++) {
-		for(int j = 0; j < 16; j++) {
-			Image tmp = charmap.crop(i*charSize, j*charSize, charSize, charSize);
-			for(int k = 0; k < tmp.width; k++) {
-				for(int l = 0; l < tmp.height; l++) {
-					chars[j*16+i][k][l] = tmp.getPixel(k, l).r != 0;
-				}
-			}
-			destroy(tmp);
-		}
-	}
-	destroy(charmap);
-	return chars;
-}
 
 /// Ease a value given an easing from https://easings.net/ and also easeLinear (which returns the given value)
 pure nothrow float ease(string easing)(float x) {
@@ -154,26 +139,32 @@ Easing easing(string s)() {
 
 /// Simple vector struct
 struct Vector {
-	float x = 0;
-	float y = 0;
-	float z = 0;
+	float x = 0, y = 0, z = 0;
+}
+
+/// Simple point struct
+struct Point {
+	int x = 0, y = 0;
+}
+
+/// Simple color struct
+struct Color {
+	float r = 0, g = 0, b = 0, a = 0;
+
+	SDL_Color toSDL() {
+		return SDL_Color(cast(ubyte)(r*255), cast(ubyte)(g*255), cast(ubyte)(b*255), cast(ubyte)(a*255));
+	}
 }
 
 Vector translation; /// How much to translate the screen by
 float zoom = 1;		 /// How much to zoom in/out
-
-// struct TexitImage {
-//	 int width;
-//	 int height;
-//	 ubyte[] rgbaBytes;
-// }
-
-// TexitImage loadPNG(string dir) {
-//	 Image i = Image.fromMemoryImage(readPng(dir));
-//	 scope(exit)
-//		 destroy(i);
-//	 return TexitImage(i.width, i.height, i.getRgbaBytes);
-// }
+	
+/// An exception with SDL
+class SDLException : Exception {
+	this(string msg) {
+		super(msg);
+	}
+}
 
 /// The main texit declaration
 mixin template Texit(string charmap, 
@@ -188,15 +179,68 @@ mixin template Texit(string charmap,
 	alias WW = WORLD_WIDTH;
 	enum WORLD_HEIGHT = worldHeight;
 	alias WH = WORLD_HEIGHT;
-	SimpleWindow window;
+	/// The window
+	Window window;
 	Tile[worldHeight][worldWidth] world; /// The world
 	bool[charSize][charSize][256] chars; /// Bitmap of each character
 	SysTime start; /// When the program was started
-	AudioOutputThread* aot;
 	float offset = 0; /// Offset to start at
 	float endTime = float.infinity; /// Time to end at
 	ulong frameCount; /// Current frame count.
+	/// Music being played
+	Mix_Music* music = null;
 
+	/// The window class
+	class Window {
+		SDL_Renderer* rend;
+		SDL_Window* win;
+
+		~this() {
+			SDL_DestroyRenderer(rend);
+			SDL_DestroyWindow(win);
+		}
+	}
+	
+	/// An image, backed by an SDL surface
+	class Image {
+		SDL_Surface* surface; /// The surface backing this image
+
+		/// Creates from an SDL surface. Note that you should only handle the texture thru this class after creating it (since the texture is deleted when the GC frees the instance)
+		this(SDL_Surface *surf) {
+			surface = surf;
+		}
+
+
+		/// Loads an image from a file
+		static Image load(string file) {
+			SDL_Surface* loaded = IMG_Load(file.toStringz);
+			if(loaded == null)
+				throw new SDLException("Could not load image file '"~file~"': "~SDL_GetError().to!string);
+			scope(exit)
+				SDL_FreeSurface(loaded);
+			SDL_Surface* converted = SDL_ConvertSurfaceFormat(loaded, SDL_PIXELFORMAT_RGBA8888, 0);
+			return new Image(converted);
+		}
+	
+		/// Gets width
+		@property int width() {
+			return surface.w;
+		}
+		/// Gets height
+		@property int height() {
+			return surface.h;
+		}
+		/// Gets the pixels of this image
+		@property Color[] pixels() {
+			import std.algorithm, std.range, std.array;
+			return (cast(ubyte*)surface.pixels)[0..surface.w*surface.h*4].chunks(4).map!(c => Color(c[1]/255f, c[2]/255f, c[3]/255f, c[0]/255f)).array;
+		}
+
+		/// Frees the texture
+		~this() {
+			SDL_FreeSurface(surface);
+		}
+	}
 	/// Represents single thing that can appear or happen on the screen
 	abstract class Event {
 		float start; /// When the event should appear
@@ -267,8 +311,14 @@ mixin template Texit(string charmap,
 	void audio(string path) {
 		if(doRender)
 			return; // don't play audio if we're rendering
-		auto controller = aot.playOgg(path);
-		controller.seek(offset);
+		if(music != null)
+			return; // audio already playing
+		music = Mix_LoadMUS(path.toStringz);
+		if(music == null)
+			throw new SDLException("Could not load audio: "~SDL_GetError().to!string);
+		if(Mix_PlayMusic(music, 1) < 0)
+			throw new SDLException("Could not play music: "~SDL_GetError().to!string);
+		Mix_SetMusicPosition(offset);
 	}
 
 	/// Puts text onto the screen
@@ -428,7 +478,6 @@ mixin template Texit(string charmap,
 				return ap[];
 			}
 			import std.stdio;
-			// writeln(tl.x+1, " ", tl.y, " ", bg, " ", fg, " ", rep("-", br.x-tl.x-2));
 			puts(this, tl.x+1, tl.y, bg, fg, rep("-", br.x-tl.x-1), true);
 			puts(this, tl.x+1, br.y, bg, fg, rep("-", br.x-tl.x-1), true);
 			puts(this, tl.x, tl.y+1, bg, fg, rep("|\n", br.y-tl.y-1), true);
@@ -485,7 +534,6 @@ mixin template Texit(string charmap,
 			float eased = ease(rel);
 			translation.x = mapBetween(eased, 0, 1, origin.x, dest.x);
 			translation.y = mapBetween(eased, 0, 1, origin.y, dest.y);
-			translation.z = mapBetween(eased, 0, 1, origin.z, dest.z);
 		}
 	}
 
@@ -530,6 +578,28 @@ mixin template Texit(string charmap,
 	}
 
 	bool doRender; /// Whether to render to an image sequence
+		
+	/// Returns a charmap given a directory and a char size
+	bool[charSize][charSize][256] loadCharmap(string path) {
+		Image charmap = Image.load(path);
+		int w = charmap.width, h = charmap.height;
+		if(w != charSize*16 && h != charSize*16)
+			throw new Exception("Charmap is incorrectly sized! Should be "~(16*charSize).to!string~"×"~(16*charSize).to!string~", but got "~w.to!string~"×"~h.to!string~".");
+		Color[] pixels = charmap.pixels;
+		bool[charSize][charSize][256] chars;
+		// probably could be more efficient but eh
+		for(int i = 0; i < 16; i++) {
+			for(int j = 0; j < 16; j++) {
+				for(int k = 0; k < charSize; k++) {
+					for(int l = 0; l < charSize; l++) {
+						import std.stdio;
+						chars[j*16+i][k][l] = pixels[(j*charSize*w+i*charSize+l*w+k)].r != 0;
+					}
+				}
+			}
+		}
+		return chars;
+	}
 
 	void main(string[] args) {
 		{
@@ -546,109 +616,114 @@ mixin template Texit(string charmap,
 				rmdirRecurse("images");
 			mkdir("images");
 		}
-		// init audio thread
-		AudioOutputThread aot_ = AudioOutputThread(true);
-		aot = &aot_;
+		// init SDL and stuff
+		if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
+			throw new SDLException("Could not load SDL: "~SDL_GetError().to!string);
+		if(Mix_Init(MIX_INIT_OGG) < 0)
+			throw new SDLException("Could not load SDL_mixer: "~SDL_GetError().to!string);
+		if(Mix_OpenAudio(44100, AUDIO_S16SYS, 2, 512))
+			throw new SDLException("Could not open audio: "~SDL_GetError().to!string);
+		window = new Window;
+		if(SDL_CreateWindowAndRenderer(cast(int)(width*charSize*scale), cast(int)(height*charSize*scale), SDL_WINDOW_SHOWN, &window.win, &window.rend) < 0)
+			throw new SDLException("Could not create window or renderer: "~SDL_GetError().to!string);
+		SDL_SetWindowTitle(window.win, title.toStringz);
+		scope(exit)
+			if(music != null)
+				Mix_FreeMusic(music);
+		// for convinience; the window is always going to be cleaned up after this function ends so it should be fine to do this
+		SDL_Renderer* rend = window.rend;
 		// init translation
 		translation = Vector(width/4, height/4);
-		// init window
-		window = new SimpleWindow(cast(int)(width*charSize*scale), cast(int)(height*charSize*scale), title, OpenGlOptions.yes, Resizability.automaticallyScaleIfPossible);
-		window.redrawOpenGlScene = delegate() {
-			glLoadIdentity();
-			glOrtho(-width*charSize*(zoom/2), width*charSize*(zoom/2), height*charSize*(zoom/2), -height*charSize*(zoom/2), -1.0f, 1.0f);
-			enum css = charSize*scale;
-			glTranslatef(-translation.x*css, -translation.y*css, -translation.z*css);
-			glClearColor(0, 0, 0, 0);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-			glBegin(GL_QUADS);
-			// render characters
-			for(int i = 0; i < worldWidth; i++) {
-				for(int j = 0; j < worldHeight; j++) {
-					auto tile = world[i][j];
-					auto ch = chars[tile.ch];
-					float x = i*css;
-					float y = j*css;
-					glColor3f(tile.bg[0], tile.bg[1], tile.bg[2]);
-					glVertex2f(x,		 y);
-					glVertex2f(x+css, y);
-					glVertex2f(x+css, y+css);
-					glVertex2f(x,		 y+css);
-					glColor3f(tile.fg[0], tile.fg[1], tile.fg[2]);
-					if(tile.ch == ' ')
-						continue; // no point to draw spaces, they're empty
-					for(int k = 0; k < charSize; k++) {
-						for(int l = 0; l < charSize; l++) {
-							if(!ch[k][l])
-								continue;
-							float ks = k*scale;
-							float ls = l*scale;
-							glVertex2f(x+ks,			 y+ls);
-							glVertex2f(x+ks+scale, y+ls);
-							glVertex2f(x+ks+scale, y+ls+scale);
-							glVertex2f(x+ks,			 y+ls+scale);
-						}
-					}
-				}
-			}
-			glEnd();
-			static if(__traits(compiles, loopGl()))
-				loopGl();
-			// create image if necessary
-			if(doRender) {
-				auto img = new Image(window.width, window.height);
-				ubyte[] data = new ubyte[](window.width*window.height*4);
-				glReadPixels(0, 0, window.width, window.height, GL_RGBA, GL_UNSIGNED_BYTE, data.ptr);
-				// flip pixels
-				size_t w = img.width*4;
-				for(size_t i = 0; i < window.height/2; i++) {
-					size_t j = window.height-i-1;
-					ubyte[] row = data[i*w..(i+1)*w].dup;
-					data[i*w..(i+1)*w] = data[j*w..(j+1)*w];
-					data[j*w..(j+1)*w] = row;
-				}
-				img.setRgbaBytes(data);
-				import std.format;
-				writeImageToPngFile("./images/%08d.png".format(frameCount), img.toTrueColorImage());
-			}
-			frameCount++;
-		};
 		// load charmap
-		chars = loadCharmap!charSize(charmap);
+		chars = loadCharmap(charmap);
 		// set time
 		start = Clock.currTime;
 		// run start
 		static if(__traits(compiles, setup()))
 			setup();
-		window.eventLoop(1, 
-			delegate() {
-				auto dif = Clock.currTime-start;
-				float time;
-				if(!doRender)
-					time = ((dif.total!"msecs")/1000f)+offset;
-				else
-					time = (1/30f)*frameCount;
-				if(time > endTime)
-					window.close();
-				import std.stdio;
-				foreach_reverse(i, evt; events) {
-					if(time >= evt.start && time <= evt.end) {
-						if(!evt.triggered) {
-							evt.enable();
-							evt.triggered = true;
-						}
-						float rel = (time-evt.start)/(evt.end-evt.start);
-						evt.time(rel, time);
+		// surface to save frames to (null if not used)
+		SDL_Surface* frameSurface;
+		if(doRender)
+			frameSurface = SDL_CreateRGBSurface(0, cast(int)(width*charSize*scale), cast(int)(height*charSize*scale), 32, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
+		scope(exit)
+			if(doRender)
+				SDL_FreeSurface(frameSurface);
+		// main loop
+		outer: while(true) {
+			// handle sdl events
+			SDL_Event e;
+			while(SDL_PollEvent(&e)) {
+				switch(e.type) {
+					case SDL_QUIT:
+						break outer;
+					default:
+						break;
+				}
+			}
+			// update other things
+			auto dif = Clock.currTime-start;
+			float time;
+			if(!doRender)
+				time = ((dif.total!"msecs")/1000f)+offset;
+			else
+				time = (1/30f)*frameCount;
+			if(time > endTime)
+				break outer;
+			foreach_reverse(i, evt; events) {
+				if(time >= evt.start && time <= evt.end) {
+					if(!evt.triggered) {
+						evt.enable();
+						evt.triggered = true;
 					}
-					else if(time > evt.end) {
-						evt.disable();
-						import std.algorithm : remove;
-						events = events.remove(i);
+					float rel = (time-evt.start)/(evt.end-evt.start);
+					evt.time(rel, time);
+				}
+				else if(time > evt.end) {
+					evt.disable();
+					import std.algorithm : remove;
+					events = events.remove(i);
+				}
+			}
+			static if(__traits(compiles, loop()))
+				loop();
+			// render world
+			const float sc = (scale*2)/zoom; // SDL2's pixel I think is twice as small as openGL's, so that's why the 2 is here
+			const float css = charSize*sc;
+			SDL_SetRenderDrawColor(rend, 0, 0, 0, 0);
+			SDL_RenderClear(rend);
+			const float tx = charSize*sc*(zoom*width/4-translation.x), ty = charSize*sc*(zoom*height/4-translation.y);
+			for(int i = 0; i < worldWidth; i++) {
+				for(int j = 0; j < worldHeight; j++) {
+					auto tile = world[i][j];
+					float x = i*css;
+					float y = j*css;
+					auto r = SDL_FRect(x+tx, y+ty, css, css);
+					SDL_SetRenderDrawColor(rend, cast(ubyte)(tile.bg[0]*255), cast(ubyte)(tile.bg[1]*255), cast(ubyte)(tile.bg[2]*255), 255);
+					SDL_RenderFillRectF(rend, &r);
+					if(tile.ch == ' ')
+						continue;
+					auto ch = chars[tile.ch];
+					SDL_SetRenderDrawColor(rend, cast(ubyte)(tile.fg[0]*255), cast(ubyte)(tile.fg[1]*255), cast(ubyte)(tile.fg[2]*255), 255);
+					for(int k = 0; k < charSize; k++) {
+						for(int l = 0; l < charSize; l++) {
+							if(!ch[k][l])
+								continue;
+							r = SDL_FRect(x+k*sc+tx, y+l*sc+ty, sc, sc);
+							SDL_RenderFillRectF(rend, &r);
+						}
 					}
 				}
-				static if(__traits(compiles, loop()))
-					loop();
-				window.redrawOpenGlSceneSoon();
 			}
-		);
+			// create image if necessary
+			if(doRender) {
+				import std.format;
+				SDL_RenderReadPixels(window.rend, null, SDL_PIXELFORMAT_ARGB8888, frameSurface.pixels, frameSurface.pitch);
+				IMG_SavePNG(frameSurface, "./images/%08d.png".format(frameCount).toStringz);
+			}
+			frameCount++;
+			SDL_RenderPresent(rend);
+		}
+		destroy(window);
+		SDL_Quit();
 	}
 }
