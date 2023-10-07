@@ -1,1 +1,0 @@
-This folder is temporary - when the new changes (adding seek function) to `arsd.simpleaudio` and `arsd.vorbis` are released this folder will be removed and these will simply be added as dependencies (like the other arsd libraries that Texit depends on).
