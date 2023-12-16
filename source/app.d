@@ -124,6 +124,11 @@ version(ImageExample) {
 	mixin Texit!("assets/qbicfeet_10x10.png", 10, 2, 64, 32, 64, 32, "Image Example");
 
 	void setup() {
-
+		queue(
+			new EntityEvent(0, float.infinity, new ImageEntity(Vector(1, 0), Vector(6, 6), "image", "./assets/image.png")),
+			new TextEvent(0, float.infinity, Point(1, 10), "Text appears ontop of entities"),
+			new EntityTranslationEvent(0, 1, "image", Vector(1, 0), Vector(1, 7.5), easing!"easeOutBounce"),
+			new EntityResizeEvent(1, 2, "image", Vector(6, 6), Vector(30, 6), easing!"easeOutCubic"),
+		);
 	}
 }

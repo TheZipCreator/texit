@@ -13,6 +13,7 @@ extern(C) {
 		float x, y, w, h;
 	}
 	int SDL_RenderFillRectF(SDL_Renderer* renderer, const(SDL_FRect*) rect);
+	int SDL_RenderCopyF(SDL_Renderer* renderer, SDL_Texture* texture, const(SDL_Rect*) srcrect, const(SDL_FRect*) dstrect);
 }
 
 /// A single tile in the world
@@ -166,6 +167,13 @@ class SDLException : Exception {
 	}
 }
 
+/// Any other exception caused by texit
+class TexitException : Exception {
+	this(string msg) {
+		super(msg);
+	}
+}
+
 /// The main texit declaration
 mixin template Texit(string charmap, 
 		int charSize, float scale,
@@ -187,6 +195,7 @@ mixin template Texit(string charmap,
 	float offset = 0; /// Offset to start at
 	float endTime = float.infinity; /// Time to end at
 	ulong frameCount; /// Current frame count.
+	Entity[string] entities; /// Entities, indexed by ID
 	/// Music being played
 	Mix_Music* music = null;
 
@@ -203,13 +212,14 @@ mixin template Texit(string charmap,
 	
 	/// An image, backed by an SDL surface
 	class Image {
+		SDL_Texture* texture; /// A texture backing this image
 		SDL_Surface* surface; /// The surface backing this image
 
 		/// Creates from an SDL surface. Note that you should only handle the texture thru this class after creating it (since the texture is deleted when the GC frees the instance)
 		this(SDL_Surface *surf) {
 			surface = surf;
+			texture = SDL_CreateTextureFromSurface(window.rend, surf);
 		}
-
 
 		/// Loads an image from a file
 		static Image load(string file) {
@@ -239,9 +249,10 @@ mixin template Texit(string charmap,
 		/// Frees the texture
 		~this() {
 			SDL_FreeSurface(surface);
+			SDL_DestroyTexture(texture);
 		}
 	}
-	/// Represents single thing that can appear or happen on the screen
+	/// Represents single thing that can happen on the screen
 	abstract class Event {
 		float start; /// When the event should appear
 		float end; /// When the event should disappear (set to Infinity if the event should always be active)
@@ -324,7 +335,7 @@ mixin template Texit(string charmap,
 	/// Puts text onto the screen
 	void puts(bool hasEvent)(Event e, int x, int y, float[3] bg, float[3] fg, string text, bool replace) {
 		int sx = x;
-		foreach(c; text) {
+		foreach(char c; text) {
 			switch(c) {
 				case '\n':
 					y++;
@@ -576,6 +587,189 @@ mixin template Texit(string charmap,
 			zoom = mapBetween(eased, 0, 1, first, second);
 		}
 	}
+	
+	/// Anything that isn't text
+	abstract class Entity {
+		string id; /// Unique ID of this entity
+		Vector pos, size; /// Position and size of the entity
+		bool visible = false; /// Whether this entity is visible right now or not
+
+		/// Generates an ID (they look like entity-0, entity-1, entity-2, entity-3, etc)
+		static string generateID() {
+			static uint last = 0;
+			return "entity-"~((last++).to!string);
+		}
+		
+		///
+		this(Vector pos, Vector size, string id = generateID()) {
+			this.pos = pos;
+			this.size = size;
+			this.id = id;
+			if(id in entities)
+				throw new TexitException("There already exists an entity with ID '"~id~"'.");
+			entities[id] = this;
+		}
+
+		/// Shows the entity
+		void show() {
+			visible = true;
+		}
+		
+		/// Hides the entity
+		void hide() {
+			visible = false;
+		}
+		
+		/// Call this to render the entity
+		final void render() {
+			if(!visible)
+				return;
+			const float sc = (scale*2)/zoom; // SDL2's pixel I think is twice as small as openGL's, so that's why the 2 is here
+			const float css = charSize*sc;
+			const float tx = css*(zoom*width/4-translation.x), ty = css*sc*(zoom*height/4-translation.y);
+			Vector spos = Vector(pos.x*css+tx, pos.y*css+ty);
+			Vector ssize = Vector(size.x*css, size.y*css);
+			render(spos, ssize);
+		}
+		/// Rendering code (this is what should be overriden)
+		void render(Vector spos, Vector ssize) {}
+	}
+
+	/// An image entity
+	class ImageEntity : Entity {
+		Image img; /// The image
+		
+		private final Vector getSize() {
+			return Vector(img.width/(charSize*scale*2), img.height/(charSize*scale*2));
+		}
+
+		this(Vector pos, Image img) {
+			this.img = img;
+			super(pos, getSize());
+		}
+
+		this(Vector pos, string id, Image img) {
+			this.img = img;
+			super(pos, getSize(), id);
+		}
+		
+		this(Vector pos, string filename) {
+			this.img = Image.load(filename);
+			super(pos, getSize());
+		}
+
+		this(Vector pos, string id, string filename) {
+			this.img = Image.load(filename);
+			super(pos, getSize(), id);
+		}
+		
+		this(Vector pos, Vector size, Image img) {
+			this.img = img;
+			super(pos, size);
+		}
+
+		this(Vector pos, Vector size, string id, Image img) {
+			this.img = img;
+			super(pos, size, id);
+		}
+		
+		this(Vector pos, Vector size, string filename) {
+			this.img = Image.load(filename);
+			super(pos, size);
+		}
+
+		this(Vector pos, Vector size, string id, string filename) {
+			this.img = Image.load(filename);
+			super(pos, size, id);
+		}
+
+		override void render(Vector spos, Vector ssize) {
+			SDL_FRect dest = SDL_FRect(spos.x, spos.y, ssize.x, ssize.y);
+			SDL_RenderCopyF(window.rend, img.texture, null, &dest);
+		}
+	}
+	/// Event that creates an entity
+	class EntityEvent : Event {
+		Entity entity;
+
+		this(float start, float end, Entity e) {
+			super(start, end);
+			entity = e;
+		}
+
+		override void enable() {
+			entity.show();
+		}
+
+		override void disable() {
+			entity.hide();
+		}
+	}
+	/// Event that changes an entity's position
+	class EntityTranslationEvent : Event {
+		Easing ease;
+		string id;
+		Vector origin, dest;
+
+		Entity entity() {
+			return entities[id];
+		}
+
+		this(float start, float end, string id, Vector origin, Vector dest, Easing e = easing!"easeLinear") {
+			super(start, end);
+			this.id = id;
+			this.origin = origin;
+			this.dest = dest;
+			this.ease = e;
+		}
+
+		override void enable() {
+			entity.pos = origin;
+		}
+
+		override void disable() {
+			entity.pos = dest;
+		}
+
+		override void time(float rel, float abs) {
+			float eased = ease(rel);
+			entity.pos.x = mapBetween(eased, 0, 1, origin.x, dest.x);
+			entity.pos.y = mapBetween(eased, 0, 1, origin.y, dest.y);
+		}
+	}
+	
+	/// Event that changes an entity's size
+	class EntityResizeEvent : Event {
+		Easing ease;
+		string id;
+		Vector origin, dest;
+
+		Entity entity() {
+			return entities[id];
+		}
+
+		this(float start, float end, string id, Vector origin, Vector dest, Easing e = easing!"easeLinear") {
+			super(start, end);
+			this.id = id;
+			this.origin = origin;
+			this.dest = dest;
+			this.ease = e;
+		}
+
+		override void enable() {
+			entity.size = origin;
+		}
+
+		override void disable() {
+			entity.size = dest;
+		}
+
+		override void time(float rel, float abs) {
+			float eased = ease(rel);
+			entity.size.x = mapBetween(eased, 0, 1, origin.x, dest.x);
+			entity.size.y = mapBetween(eased, 0, 1, origin.y, dest.y);
+		}
+	}
 
 	bool doRender; /// Whether to render to an image sequence
 		
@@ -630,7 +824,7 @@ mixin template Texit(string charmap,
 		scope(exit)
 			if(music != null)
 				Mix_FreeMusic(music);
-		// for convinience; the window is always going to be cleaned up after this function ends so it should be fine to do this
+		// for convenience; the window is always going to be cleaned up after this function ends so it should be fine to do this
 		SDL_Renderer* rend = window.rend;
 		// init translation
 		translation = Vector(width/4, height/4);
@@ -691,6 +885,9 @@ mixin template Texit(string charmap,
 			const float css = charSize*sc;
 			SDL_SetRenderDrawColor(rend, 0, 0, 0, 0);
 			SDL_RenderClear(rend);
+			// render entities first
+			foreach(_, ent; entities)
+				ent.render();
 			const float tx = charSize*sc*(zoom*width/4-translation.x), ty = charSize*sc*(zoom*height/4-translation.y);
 			for(int i = 0; i < worldWidth; i++) {
 				for(int j = 0; j < worldHeight; j++) {
@@ -699,7 +896,9 @@ mixin template Texit(string charmap,
 					float y = j*css;
 					auto r = SDL_FRect(x+tx, y+ty, css, css);
 					SDL_SetRenderDrawColor(rend, cast(ubyte)(tile.bg[0]*255), cast(ubyte)(tile.bg[1]*255), cast(ubyte)(tile.bg[2]*255), 255);
-					SDL_RenderFillRectF(rend, &r);
+					// only render background color if it's not black
+					if(tile.bg[0] != 0 || tile.bg[1] != 0 || tile.bg[2] != 0)
+						SDL_RenderFillRectF(rend, &r);
 					if(tile.ch == ' ')
 						continue;
 					auto ch = chars[tile.ch];
