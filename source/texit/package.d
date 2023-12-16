@@ -308,7 +308,7 @@ mixin template Texit(string charmap,
 			static assert(is(typeof(e) : Event), "Only events can be queued!");
 			if(offset >= e.end) {
 				e.disable();
-				return;
+				continue;
 			}
 			if(offset >= e.start) {
 				e.enable();
@@ -830,11 +830,11 @@ mixin template Texit(string charmap,
 		translation = Vector(width/4, height/4);
 		// load charmap
 		chars = loadCharmap(charmap);
-		// set time
-		start = Clock.currTime;
 		// run start
 		static if(__traits(compiles, setup()))
 			setup();
+		// set time
+		start = Clock.currTime;
 		// surface to save frames to (null if not used)
 		SDL_Surface* frameSurface;
 		if(doRender)
